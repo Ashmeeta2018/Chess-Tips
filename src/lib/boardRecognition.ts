@@ -83,6 +83,13 @@ interface FenStats {
   whitePieces: number
   blackPieces: number
   totalPieces: number
+  whitePawnsOnBackRank: number
+  blackPawnsOnBackRank: number
+}
+
+interface FenPlausibility {
+  valid: boolean
+  confidenceBoost: boolean
 }
 
 const collectFenStats = (fen: string): FenStats | null => {
@@ -100,9 +107,11 @@ const collectFenStats = (fen: string): FenStats | null => {
     whitePieces: 0,
     blackPieces: 0,
     totalPieces: 0,
+    whitePawnsOnBackRank: 0,
+    blackPawnsOnBackRank: 0,
   }
 
-  for (const rank of ranks) {
+  for (const [rankIndex, rank] of ranks.entries()) {
     let fileCount = 0
 
     for (const char of rank) {
@@ -127,6 +136,9 @@ const collectFenStats = (fen: string): FenStats | null => {
         }
         if (char === 'P') {
           stats.whitePawns += 1
+          if (rankIndex === 0 || rankIndex === 7) {
+            stats.whitePawnsOnBackRank += 1
+          }
         }
       } else {
         stats.blackPieces += 1
@@ -135,6 +147,9 @@ const collectFenStats = (fen: string): FenStats | null => {
         }
         if (char === 'p') {
           stats.blackPawns += 1
+          if (rankIndex === 0 || rankIndex === 7) {
+            stats.blackPawnsOnBackRank += 1
+          }
         }
       }
     }
@@ -147,25 +162,40 @@ const collectFenStats = (fen: string): FenStats | null => {
   return stats
 }
 
-const fenLooksPlausible = (fen: string): boolean => {
+const evaluateFenPlausibility = (fen: string): FenPlausibility => {
   const stats = collectFenStats(fen)
   if (!stats) {
-    return false
+    return { valid: false, confidenceBoost: false }
   }
 
   if (stats.whiteKings !== 1 || stats.blackKings !== 1) {
-    return false
+    return { valid: false, confidenceBoost: false }
   }
 
   if (stats.whitePawns > 8 || stats.blackPawns > 8) {
-    return false
+    return { valid: false, confidenceBoost: false }
   }
 
   if (stats.whitePieces > 16 || stats.blackPieces > 16) {
-    return false
+    return { valid: false, confidenceBoost: false }
   }
 
-  return stats.totalPieces >= 2 && stats.totalPieces <= 32
+  if (stats.totalPieces < 2 || stats.totalPieces > 32) {
+    return { valid: false, confidenceBoost: false }
+  }
+
+  // Pawns cannot legally remain on rank 1 or rank 8.
+  if (stats.whitePawnsOnBackRank > 0 || stats.blackPawnsOnBackRank > 0) {
+    return { valid: false, confidenceBoost: false }
+  }
+
+  const balancedMaterial = stats.whitePieces >= 3 && stats.blackPieces >= 3
+  const enoughBoardSignal = stats.totalPieces >= 8
+
+  return {
+    valid: true,
+    confidenceBoost: balancedMaterial && enoughBoardSignal,
+  }
 }
 
 export const warmupBoardRecognizer = async (): Promise<void> => {
@@ -193,10 +223,10 @@ export const detectFenFromImage = async (
 
     const { placement, orientation } = module.resolveOrientation(result.placement)
     const fen = module.placementToFen(placement, turn)
-    const plausibleFen = fenLooksPlausible(fen)
+    const plausibility = evaluateFenPlausibility(fen)
     const reliable = result.reliable !== false
 
-    if (!plausibleFen) {
+    if (!plausibility.valid) {
       return {
         status: 'no-board',
         fen: null,
@@ -204,6 +234,17 @@ export const detectFenFromImage = async (
         orientation: null,
         message:
           'Detected layout did not resemble a valid chess position. Try a clearer, straighter board image.',
+      }
+    }
+
+    if (!reliable && plausibility.confidenceBoost) {
+      return {
+        status: 'ok',
+        fen,
+        reliable: false,
+        orientation: normalizeOrientation(orientation),
+        message:
+          'Board recognized and auto-validated from piece layout. Verify quickly before deep analysis.',
       }
     }
 

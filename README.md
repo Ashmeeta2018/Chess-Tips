@@ -45,7 +45,8 @@ npm run dev:cdrive
 npm run build:cdrive
 ```
 
-These scripts route Vite temp files and TypeScript build-info files through junctions into `%LOCALAPPDATA%/ChessTipsCache`.
+These scripts mirror the project into `%LOCALAPPDATA%/ChessTipsMirror`, run Vite and TypeScript there, and keep source changes synced while dev mode is running.
+For `build:cdrive`, generated `dist/` output is synced back into your workspace after a successful build.
 
 Optional: run the local cloud sync mock server.
 
@@ -69,6 +70,16 @@ Build for production:
 ```bash
 npm run build
 ```
+
+## CI
+
+GitHub Actions validates every push and pull request to `main` by running:
+
+- `npm run lint`
+- `npm run test:sync-contract`
+- `npm run build`
+
+Workflow file: `.github/workflows/ci.yml`.
 
 ## Core Files
 

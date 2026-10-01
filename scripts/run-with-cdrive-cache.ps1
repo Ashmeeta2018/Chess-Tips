@@ -9,8 +9,15 @@
 
 $ErrorActionPreference = 'Stop'
 
-$projectRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $mirrorRoot = Join-Path $env:LOCALAPPDATA 'ChessTipsMirror'
+$excludedProjectDirs = @(
+  'node_modules',
+  'dist',
+  '.git',
+  '.vite-temp',
+  '.tmp'
+)
 
 function Invoke-Robocopy {
   param(
@@ -31,18 +38,26 @@ function Invoke-Robocopy {
   }
 }
 
-Invoke-Robocopy -Source $projectRoot -Target $mirrorRoot -CopyArgs @(
-  '/MIR',
-  '/XD',
-  'node_modules',
-  'dist',
-  '.git',
-  '.vite-temp',
-  '.tmp'
-)
+function Sync-ProjectToMirror {
+  Invoke-Robocopy -Source $projectRoot -Target $mirrorRoot -CopyArgs (
+    @(
+      '/MIR',
+      '/R:1',
+      '/W:1',
+      '/XD'
+    ) + $excludedProjectDirs
+  )
+}
+
+Sync-ProjectToMirror
 
 $mirrorNodeModules = Join-Path $mirrorRoot 'node_modules'
 if (-not (Test-Path $mirrorNodeModules)) {
+  $projectNodeModules = Join-Path $projectRoot 'node_modules'
+  if (-not (Test-Path $projectNodeModules)) {
+    throw "node_modules not found in project root. Run npm install before using this script."
+  }
+
   Invoke-Robocopy -Source (Join-Path $projectRoot 'node_modules') -Target $mirrorNodeModules -CopyArgs @('/MIR')
 }
 
@@ -56,21 +71,67 @@ if (-not (Test-Path $tscBin)) {
   throw "TypeScript binary not found in mirror at $tscBin"
 }
 
+$syncProcess = $null
+
+if ($Mode -eq 'dev') {
+  $syncArgs = @(
+    $projectRoot,
+    $mirrorRoot,
+    '/MIR',
+    '/R:1',
+    '/W:1',
+    '/MON:1',
+    '/MOT:1',
+    '/XD'
+  ) + $excludedProjectDirs + @(
+    '/NFL',
+    '/NDL',
+    '/NJH',
+    '/NJS',
+    '/NP'
+  )
+
+  $syncProcess = Start-Process -FilePath 'robocopy.exe' -ArgumentList $syncArgs -WindowStyle Hidden -PassThru
+}
+
+$exitCode = 0
+
 Push-Location $mirrorRoot
 try {
   if ($Mode -eq 'dev') {
     & $viteBin @Args
-    exit $LASTEXITCODE
+    $exitCode = $LASTEXITCODE
   }
+  else {
+    & $tscBin -b
+    if ($LASTEXITCODE -ne 0) {
+      $exitCode = $LASTEXITCODE
+    }
+    else {
+      & $viteBin build
+      $buildExitCode = $LASTEXITCODE
 
-  & $tscBin -b
-  if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+      if ($buildExitCode -eq 0) {
+        $mirrorDist = Join-Path $mirrorRoot 'dist'
+        if (Test-Path $mirrorDist) {
+          Invoke-Robocopy -Source $mirrorDist -Target (Join-Path $projectRoot 'dist') -CopyArgs @(
+            '/MIR',
+            '/R:1',
+            '/W:1'
+          )
+        }
+      }
+
+      $exitCode = $buildExitCode
+    }
   }
-
-  & $viteBin build
-  exit $LASTEXITCODE
 }
 finally {
   Pop-Location
+
+  if ($syncProcess -and -not $syncProcess.HasExited) {
+    Stop-Process -Id $syncProcess.Id -Force -ErrorAction SilentlyContinue
+  }
 }
+
+exit $exitCode
