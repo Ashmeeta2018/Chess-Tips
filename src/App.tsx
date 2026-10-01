@@ -31,6 +31,7 @@ const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const
 
 const HISTORY_STORAGE_BASE_KEY = 'chess-tips-study-history-v2'
 const PHOTO_STORAGE_BASE_KEY = 'chess-tips-photo-study-v2'
+const THEME_STORAGE_KEY = 'chess-tips-theme-v1'
 const MAX_STUDY_ENTRIES = 80
 const MAX_PHOTO_STUDIES = 18
 const MAX_PHOTO_BYTES = 2_500_000
@@ -39,6 +40,7 @@ const MAX_PV_MOVES_TO_SHOW = 6
 type EngineSource = 'heuristic' | 'stockfish'
 type Side = 'w' | 'b'
 type AppScreen = 'board' | 'coach' | 'study' | 'learn'
+type ThemeMode = 'bright' | 'dark'
 type DetectionStatus = BoardRecognitionResult['status']
 
 interface StudyEntry {
@@ -86,6 +88,11 @@ const APP_SCREEN_MENU: Array<{ id: AppScreen; label: string; caption: string }> 
   { id: 'coach', label: 'Coach', caption: 'Analyze lines and grade ideas' },
   { id: 'study', label: 'Study', caption: 'History, profiles, and uploads' },
   { id: 'learn', label: 'Learn', caption: 'Roadmaps and next formats' },
+]
+
+const THEME_OPTIONS: Array<{ id: ThemeMode; label: string }> = [
+  { id: 'bright', label: 'Bright' },
+  { id: 'dark', label: 'Dark' },
 ]
 
 const LEARNING_TRACKS = [
@@ -153,6 +160,13 @@ const parseAppScreenFromHash = (hash: string): AppScreen => {
   if (normalized === 'study') return 'study'
   if (normalized === 'learn') return 'learn'
   return 'board'
+}
+
+const parseThemeMode = (value: string | null): ThemeMode | null => {
+  if (value === 'bright' || value === 'dark') {
+    return value
+  }
+  return null
 }
 
 const qualityTone = (quality: string): string => {
@@ -344,6 +358,17 @@ const initialActiveProfileId =
   loadActiveProfileId() ?? initialProfiles[0]?.id ?? createUserProfile('Learner 1').id
 
 function App() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') return 'bright'
+
+    const storedTheme = parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY))
+    if (storedTheme) {
+      return storedTheme
+    }
+
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'bright'
+  })
+
   const [activeScreen, setActiveScreen] = useState<AppScreen>(() =>
     typeof window === 'undefined' ? 'board' : parseAppScreenFromHash(window.location.hash),
   )
@@ -397,6 +422,20 @@ function App() {
       buildScopedStorageKey(PHOTO_STORAGE_BASE_KEY, initialActiveProfileId),
     ),
   )
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', themeMode)
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, themeMode)
+      } catch {
+        // Ignore storage errors.
+      }
+    }
+  }, [themeMode])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1106,10 +1145,27 @@ function App() {
               compare alternatives, and understand why one line is stronger than
               another.
             </p>
-            <div className="signal-row">
-              <span className="pill">Interactive board</span>
-              <span className="pill">Move quality labels</span>
-              <span className="pill">{activeEngineLabel}</span>
+
+            <div className="hero-tools-row">
+              <div className="signal-row">
+                <span className="pill">Interactive board</span>
+                <span className="pill">Move quality labels</span>
+                <span className="pill">{activeEngineLabel}</span>
+              </div>
+
+              <div className="theme-switch" role="group" aria-label="Theme mode">
+                {THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`theme-option ${themeMode === option.id ? 'is-active' : ''}`}
+                    onClick={() => setThemeMode(option.id)}
+                    aria-pressed={themeMode === option.id}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <nav className="app-nav" aria-label="Primary screens">
