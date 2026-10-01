@@ -63,15 +63,15 @@ interface PhotoStudyItem {
   previewDataUrl: string
 }
 
+interface StockfishMoveAdvice extends MoveAdvice {
+  pvPreview: string
+}
+
 interface CandidateReviewResult {
   candidateMove: MoveAdvice | null
   candidateComparison: string | null
   candidateError: string | null
   source: EngineSource
-}
-
-interface StockfishMoveAdvice extends MoveAdvice {
-  pvPreview: string
 }
 
 const APP_SCREEN_HASHES: Record<AppScreen, string> = {
@@ -199,7 +199,7 @@ const saveArrayToStorage = (key: string, value: unknown[]): void => {
   try {
     window.localStorage.setItem(key, JSON.stringify(value))
   } catch {
-    // Ignore write errors.
+    // Ignore quota/private mode errors.
   }
 }
 
@@ -213,6 +213,16 @@ const readFileAsDataUrl = (file: File): Promise<string> =>
     reader.onerror = () => reject(new Error('File read failed.'))
     reader.readAsDataURL(file)
   })
+
+const formatDateTime = (isoDate: string): string => {
+  const date = new Date(isoDate)
+  return new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
 
 const parseUciMove = (
   uci: string,
@@ -307,9 +317,12 @@ const parseCandidateMoveInput = (
     }
   | { error: string } => {
   const cleanMove = rawMove.trim()
-  if (!cleanMove) return { error: 'Enter a move like e4, Nf3, or e2e4 to get feedback.' }
+  if (!cleanMove) {
+    return { error: 'Enter a move like e4, Nf3, or e2e4 to get feedback.' }
+  }
 
   const draft = new Chess(fen)
+
   try {
     const uciParsed = parseUciMove(cleanMove)
     const move = uciParsed
@@ -324,16 +337,6 @@ const parseCandidateMoveInput = (
   } catch {
     return { error: 'That move is not legal in this exact position.' }
   }
-}
-
-const formatDateTime = (isoDate: string): string => {
-  const date = new Date(isoDate)
-  return new Intl.DateTimeFormat('en', {
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
 }
 
 const initialProfiles = ensureProfiles(loadProfiles())
@@ -409,6 +412,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+
     const expectedHash = APP_SCREEN_HASHES[activeScreen]
     if (window.location.hash !== expectedHash) {
       window.history.replaceState(null, '', expectedHash)
@@ -970,6 +974,7 @@ function App() {
   const uploadPhotoStudy = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
+
     if (!file) return
 
     if (!file.type.startsWith('image/')) {
@@ -1098,7 +1103,8 @@ function App() {
             <h1>Learn Chess With Explanations, Not Guesswork</h1>
             <p className="hero-copy">
               Build intuition from basics to advanced play. Explore candidate moves,
-              compare alternatives, and understand why one line is stronger than another.
+              compare alternatives, and understand why one line is stronger than
+              another.
             </p>
             <div className="signal-row">
               <span className="pill">Interactive board</span>
@@ -1200,7 +1206,11 @@ function App() {
               >
                 Clear Selection
               </button>
-              <button type="button" className="ghost-button" onClick={() => navigateToScreen('coach')}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => navigateToScreen('coach')}
+              >
                 Open Coach Screen
               </button>
             </div>
@@ -1298,7 +1308,11 @@ function App() {
               >
                 Clear Stockfish Lines
               </button>
-              <button type="button" className="ghost-button" onClick={() => navigateToScreen('board')}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => navigateToScreen('board')}
+              >
                 Back To Board
               </button>
             </div>
@@ -1363,22 +1377,29 @@ function App() {
 
             {activeCandidateReview ? (
               <div className="candidate-result">
-                {activeCandidateReview.candidateError ? <p>{activeCandidateReview.candidateError}</p> : null}
+                {activeCandidateReview.candidateError ? (
+                  <p>{activeCandidateReview.candidateError}</p>
+                ) : null}
                 {activeCandidateReview.candidateMove ? (
                   <>
                     <p>
                       <strong>{activeCandidateReview.candidateMove.san}</strong> is rated{' '}
-                      <span className={`quality-chip ${qualityTone(activeCandidateReview.candidateMove.quality)}`}>
+                      <span
+                        className={`quality-chip ${qualityTone(activeCandidateReview.candidateMove.quality)}`}
+                      >
                         {activeCandidateReview.candidateMove.quality}
                       </span>
                       .
                     </p>
                     <p>{activeCandidateReview.candidateMove.explanation}</p>
-                    {activeCandidateReview.candidateComparison ? <p>{activeCandidateReview.candidateComparison}</p> : null}
-                    <p>
-                      Candidate grading source:{' '}
-                      {activeCandidateReview.source === 'stockfish' ? 'Stockfish.' : 'Built-in heuristic engine.'}
-                    </p>
+                    {activeCandidateReview.candidateComparison ? (
+                      <p>{activeCandidateReview.candidateComparison}</p>
+                    ) : null}
+                    {activeCandidateReview.source === 'stockfish' ? (
+                      <p>Candidate grading source: Stockfish.</p>
+                    ) : (
+                      <p>Candidate grading source: Built-in heuristic engine.</p>
+                    )}
                   </>
                 ) : null}
               </div>
@@ -1399,15 +1420,22 @@ function App() {
               <article className="utility-card">
                 <div className="utility-head">
                   <h3>Progress Tracker</h3>
-                  <button type="button" className="ghost-button" onClick={clearStudyHistory}>Clear</button>
+                  <button type="button" className="ghost-button" onClick={clearStudyHistory}>
+                    Clear
+                  </button>
                 </div>
 
                 <div className="profile-controls">
                   <label>
                     Active Profile
-                    <select value={activeProfile.id} onChange={(event) => switchActiveProfile(event.target.value)}>
+                    <select
+                      value={activeProfile.id}
+                      onChange={(event) => switchActiveProfile(event.target.value)}
+                    >
                       {profiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>{profile.name}</option>
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
                       ))}
                     </select>
                   </label>
@@ -1431,51 +1459,60 @@ function App() {
                   </div>
 
                   {syncMessage ? <p className="history-note">{syncMessage}</p> : null}
+                  {activeProfile.lastSyncedAt ? (
+                    <p className="history-meta">Last synced {formatDateTime(activeProfile.lastSyncedAt)}</p>
+                  ) : null}
                 </div>
-
-                <div className="stats-row">
-                  <span className="stat-chip">Reviews {historySummary.total}</span>
-                  <span className="stat-chip">Best/Strong {historySummary.bestStrong}</span>
-                  <span className="stat-chip">Playable {historySummary.playable}</span>
-                  <span className="stat-chip">Mistakes {historySummary.mistakes}</span>
-                </div>
-
-                {historySummary.topWarning ? (
-                  <p className="warning-signal">Common risk: {historySummary.topWarning}</p>
-                ) : null}
 
                 {studyHistory.length === 0 ? (
-                  <p className="empty-note">No study entries yet.</p>
+                  <p className="empty-note">
+                    Submit candidate moves to start building your personal learning history.
+                  </p>
                 ) : (
-                  <ol className="history-list">
-                    {studyHistory.slice(0, 6).map((item) => (
-                      <li key={item.id} className="history-item">
-                        <p className="history-line">
-                          <strong>{item.moveSan}</strong> rated{' '}
-                          <span className={`quality-chip ${qualityTone(item.quality)}`}>{item.quality}</span>{' '}
-                          for {colorName(item.sideToMove)}.
-                        </p>
-                        <p className="history-meta">
-                          {formatDateTime(item.timestamp)} · input {item.moveInput} · eval {item.scoreLabel}
-                        </p>
-                        {item.comparison ? <p className="history-note">{item.comparison}</p> : null}
-                        <div className="history-actions">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              applyFenPosition(item.fen, 'Loaded position from your progress tracker.')
-                              navigateToScreen('board')
-                            }}
-                          >
-                            Load Position
-                          </button>
-                          <button type="button" className="ghost-button" onClick={() => removeHistoryItem(item.id)}>
-                            Delete
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
+                  <>
+                    <div className="stats-row">
+                      <span className="stat-chip">Reviews {historySummary.total}</span>
+                      <span className="stat-chip">Best/Strong {historySummary.bestStrong}</span>
+                      <span className="stat-chip">Playable {historySummary.playable}</span>
+                      <span className="stat-chip">Mistakes {historySummary.mistakes}</span>
+                    </div>
+
+                    {historySummary.topWarning ? (
+                      <p className="warning-signal">Common risk: {historySummary.topWarning}</p>
+                    ) : null}
+
+                    <ol className="history-list">
+                      {studyHistory.slice(0, 6).map((item) => (
+                        <li key={item.id} className="history-item">
+                          <p className="history-line">
+                            <strong>{item.moveSan}</strong> rated{' '}
+                            <span className={`quality-chip ${qualityTone(item.quality)}`}>
+                              {item.quality}
+                            </span>{' '}
+                            for {colorName(item.sideToMove)}.
+                          </p>
+                          <p className="history-meta">
+                            {formatDateTime(item.timestamp)} · input {item.moveInput} · eval {item.scoreLabel}
+                          </p>
+                          {item.comparison ? <p className="history-note">{item.comparison}</p> : null}
+                          <div className="history-actions">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyFenPosition(item.fen, 'Loaded position from your progress tracker.')
+                                navigateToScreen('board')
+                              }}
+                            >
+                              Load Position
+                            </button>
+                            <button type="button" className="ghost-button" onClick={() => removeHistoryItem(item.id)}>
+                              Delete
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </>
                 )}
               </article>
 
@@ -1488,7 +1525,10 @@ function App() {
                 </p>
                 <label>
                   Side To Move For Detection
-                  <select value={detectTurn} onChange={(event) => setDetectTurn(event.target.value as Side)}>
+                  <select
+                    value={detectTurn}
+                    onChange={(event) => setDetectTurn(event.target.value as Side)}
+                  >
                     <option value="w">White to move</option>
                     <option value="b">Black to move</option>
                   </select>
@@ -1641,7 +1681,9 @@ function App() {
                 if (detectedFenEditorMessage) setDetectedFenEditorMessage(null)
               }}
             />
-            {detectedFenEditorMessage ? <p className="position-message">{detectedFenEditorMessage}</p> : null}
+            {detectedFenEditorMessage ? (
+              <p className="position-message">{detectedFenEditorMessage}</p>
+            ) : null}
             <div className="history-actions">
               <button type="button" onClick={applyDetectedFenFromEditor}>Load Reviewed FEN</button>
               <button type="button" className="ghost-button" onClick={closeDetectionEditor}>Cancel</button>
