@@ -32,10 +32,13 @@ const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const
 const HISTORY_STORAGE_BASE_KEY = 'chess-tips-study-history-v2'
 const PHOTO_STORAGE_BASE_KEY = 'chess-tips-photo-study-v2'
 const THEME_STORAGE_KEY = 'chess-tips-theme-v1'
+const LEARN_PROGRESS_STORAGE_KEY = 'chess-tips-learn-progress-v1'
+const LEARN_DAILY_STORAGE_KEY = 'chess-tips-learn-daily-v1'
 const MAX_STUDY_ENTRIES = 80
 const MAX_PHOTO_STUDIES = 18
 const MAX_PHOTO_BYTES = 2_500_000
 const MAX_PV_MOVES_TO_SHOW = 6
+const DAILY_LEARN_GOAL = 2
 
 type EngineSource = 'heuristic' | 'stockfish'
 type Side = 'w' | 'b'
@@ -76,6 +79,18 @@ interface CandidateReviewResult {
   source: EngineSource
 }
 
+interface LearningTrack {
+  id: string
+  level: string
+  target: string
+  outcomes: string[]
+}
+
+interface DailyLearnProgress {
+  date: string
+  completed: number
+}
+
 const APP_SCREEN_HASHES: Record<AppScreen, string> = {
   board: '#/board',
   coach: '#/coach',
@@ -95,8 +110,9 @@ const THEME_OPTIONS: Array<{ id: ThemeMode; label: string }> = [
   { id: 'dark', label: 'Dark' },
 ]
 
-const LEARNING_TRACKS = [
+const LEARNING_TRACKS: LearningTrack[] = [
   {
+    id: 'beginner',
     level: 'Beginner',
     target: 'Rules, board vision, and confidence',
     outcomes: [
@@ -106,6 +122,7 @@ const LEARNING_TRACKS = [
     ],
   },
   {
+    id: 'intermediate',
     level: 'Intermediate',
     target: 'Tactics and positional planning',
     outcomes: [
@@ -115,6 +132,7 @@ const LEARNING_TRACKS = [
     ],
   },
   {
+    id: 'advanced',
     level: 'Advanced',
     target: 'Conversion and deep understanding',
     outcomes: [
@@ -123,7 +141,22 @@ const LEARNING_TRACKS = [
       'Prepare opening repertoires with explanation, not only moves.',
     ],
   },
-] as const
+]
+
+const TRACK_OUTCOME_COUNTS = Object.fromEntries(
+  LEARNING_TRACKS.map((track) => [track.id, track.outcomes.length]),
+) as Record<string, number>
+
+const QUALITY_SCORE_MAP: Record<string, number> = {
+  Best: 100,
+  Strong: 84,
+  Playable: 66,
+  Inaccuracy: 46,
+  Mistake: 28,
+  Blunder: 12,
+}
+
+const MISTAKE_QUALITIES = new Set(['Inaccuracy', 'Mistake', 'Blunder'])
 
 const EXPANSION_MODES = [
   {
@@ -209,6 +242,38 @@ const safeArrayFromStorage = <T,>(key: string): T[] => {
 }
 
 const saveArrayToStorage = (key: string, value: unknown[]): void => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Ignore quota/private mode errors.
+  }
+}
+
+const safeRecordFromStorage = (key: string): Record<string, number> => {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {}
+    }
+
+    const nextRecord: Record<string, number> = {}
+    for (const [entryKey, entryValue] of Object.entries(parsed)) {
+      if (typeof entryValue === 'number' && Number.isFinite(entryValue) && entryValue >= 0) {
+        nextRecord[entryKey] = entryValue
+      }
+    }
+
+    return nextRecord
+  } catch {
+    return {}
+  }
+}
+
+const saveRecordToStorage = (key: string, value: Record<string, number>): void => {
   if (typeof window === 'undefined') return
   try {
     window.localStorage.setItem(key, JSON.stringify(value))
@@ -353,9 +418,42 @@ const parseCandidateMoveInput = (
   }
 }
 
+const buildCoachNote = (move: MoveAdvice): { headline: string; why: string; fix: string; pattern: string } => {
+  const warning = move.warnings[0] ?? null
+  const responseBase = move.bestReply
+    ? `Before you lock in your move, calculate forcing replies like ${move.bestReply}.`
+    : 'Before you commit, check checks, captures, and direct threats for both sides.'
+
+  if (move.quality === 'Best' || move.quality === 'Strong') {
+    return {
+      headline: 'Great practical choice. This move keeps momentum on your side.',
+      why: warning ?? move.explanation,
+      fix: `${responseBase} Keep this disciplined candidate-comparison routine.`,
+      pattern: 'Pattern to keep: choose active moves that improve pieces while limiting counterplay.',
+    }
+  }
+
+  if (move.quality === 'Playable' || move.quality === 'Inaccuracy') {
+    return {
+      headline: 'Reasonable idea, but there is a cleaner continuation available.',
+      why: warning ?? move.explanation,
+      fix: `${responseBase} Spend one extra calculation cycle before making this move in a real game.`,
+      pattern: 'Pattern to train: compare your top two candidates and reject the one that loosens king safety or piece coordination.',
+    }
+  }
+
+  return {
+    headline: 'Critical swing detected. This move gives up too much value.',
+    why: warning ?? move.explanation,
+    fix: `${responseBase} Start with defense-first candidate moves that reduce tactical shots.`,
+    pattern: 'Pattern to train: blunder-check loose pieces, back-rank safety, and forcing tactics before every move.',
+  }
+}
+
 const initialProfiles = ensureProfiles(loadProfiles())
 const initialActiveProfileId =
   loadActiveProfileId() ?? initialProfiles[0]?.id ?? createUserProfile('Learner 1').id
+const initialTodayKey = new Date().toISOString().slice(0, 10)
 
 function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -422,6 +520,37 @@ function App() {
       buildScopedStorageKey(PHOTO_STORAGE_BASE_KEY, initialActiveProfileId),
     ),
   )
+  const [learnProgress, setLearnProgress] = useState<Record<string, number>>(() =>
+    safeRecordFromStorage(LEARN_PROGRESS_STORAGE_KEY),
+  )
+  const [learnDailyProgress, setLearnDailyProgress] = useState<DailyLearnProgress>(() => {
+    if (typeof window === 'undefined') {
+      return { date: initialTodayKey, completed: 0 }
+    }
+
+    try {
+      const raw = window.localStorage.getItem(LEARN_DAILY_STORAGE_KEY)
+      if (!raw) {
+        return { date: initialTodayKey, completed: 0 }
+      }
+
+      const parsed = JSON.parse(raw)
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        typeof parsed.date === 'string' &&
+        typeof parsed.completed === 'number'
+      ) {
+        if (parsed.date === initialTodayKey) {
+          return { date: parsed.date, completed: Math.max(0, Math.floor(parsed.completed)) }
+        }
+      }
+
+      return { date: initialTodayKey, completed: 0 }
+    } catch {
+      return { date: initialTodayKey, completed: 0 }
+    }
+  })
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -436,6 +565,26 @@ function App() {
       }
     }
   }, [themeMode])
+
+  useEffect(() => {
+    saveRecordToStorage(LEARN_PROGRESS_STORAGE_KEY, learnProgress)
+  }, [learnProgress])
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    if (learnDailyProgress.date !== today) {
+      setLearnDailyProgress({ date: today, completed: 0 })
+    }
+  }, [learnDailyProgress.date])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(LEARN_DAILY_STORAGE_KEY, JSON.stringify(learnDailyProgress))
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [learnDailyProgress])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -559,6 +708,14 @@ function App() {
       ? `Stockfish top line: ${stockfishAdvice[0].san} (${stockfishAdvice[0].scoreLabel}).`
       : positionAnalysis.summary
 
+  const candidateCoachNote = useMemo(
+    () =>
+      activeCandidateReview?.candidateMove
+        ? buildCoachNote(activeCandidateReview.candidateMove)
+        : null,
+    [activeCandidateReview],
+  )
+
   const historySummary = useMemo(() => {
     const summary = { bestStrong: 0, playable: 0, mistakes: 0 }
     const warningCounts = new Map<string, number>()
@@ -588,6 +745,111 @@ function App() {
       topWarning,
     }
   }, [studyHistory])
+
+  const momentumSummary = useMemo(() => {
+    const recent = [...studyHistory].slice(0, 18).reverse()
+    const points = recent.map((entry, index) => {
+      const qualityScore = QUALITY_SCORE_MAP[entry.quality] ?? 50
+      const lossPenalty = Math.min(24, entry.loss / 18)
+      return {
+        id: `${entry.id}-${index}`,
+        score: Math.max(8, Math.min(100, Math.round(qualityScore - lossPenalty))),
+        quality: entry.quality,
+      }
+    })
+
+    if (points.length === 0) {
+      return {
+        points,
+        average: 0,
+        trendLabel: 'Add a few reviewed moves to start tracking momentum.',
+      }
+    }
+
+    const average = points.reduce((sum, item) => sum + item.score, 0) / points.length
+    if (points.length < 4) {
+      return {
+        points,
+        average,
+        trendLabel: 'Momentum baseline is forming. Keep reviewing candidate moves.',
+      }
+    }
+
+    const splitIndex = Math.floor(points.length / 2)
+    const firstHalf = points.slice(0, splitIndex)
+    const secondHalf = points.slice(splitIndex)
+    const firstAvg = firstHalf.reduce((sum, item) => sum + item.score, 0) / firstHalf.length
+    const secondAvg = secondHalf.reduce((sum, item) => sum + item.score, 0) / secondHalf.length
+    const delta = secondAvg - firstAvg
+
+    const trendLabel =
+      delta >= 5
+        ? 'Momentum improving in recent decisions.'
+        : delta <= -5
+          ? 'Momentum slipping. Slow down and verify forcing lines.'
+          : 'Momentum is stable. Keep stacking accurate decisions.'
+
+    return {
+      points,
+      average,
+      trendLabel,
+    }
+  }, [studyHistory])
+
+  const recurringRisks = useMemo(() => {
+    const riskCounts = new Map<string, number>()
+
+    for (const entry of studyHistory) {
+      if (!MISTAKE_QUALITIES.has(entry.quality)) continue
+
+      const riskKey =
+        entry.warning ??
+        (entry.loss >= 240
+          ? 'Large evaluation swings after candidate moves.'
+          : 'Move quality drops in tactical moments.')
+
+      riskCounts.set(riskKey, (riskCounts.get(riskKey) ?? 0) + 1)
+    }
+
+    return [...riskCounts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 3)
+      .map(([risk, count]) => ({ risk, count }))
+  }, [studyHistory])
+
+  const personalDrills = useMemo(() => {
+    return studyHistory
+      .filter((entry) => MISTAKE_QUALITIES.has(entry.quality))
+      .sort((left, right) => right.loss - left.loss)
+      .slice(0, 3)
+      .map((entry, index) => ({
+        id: entry.id,
+        title: `Drill ${index + 1}: Review ${entry.moveSan}`,
+        prompt:
+          entry.warning ??
+          `Find a safer alternative to ${entry.moveSan} and keep your evaluation drop under ${(Math.max(40, Math.round(entry.loss * 0.45)) / 100).toFixed(2)} pawns.`,
+        fen: entry.fen,
+        sideToMove: entry.sideToMove,
+      }))
+  }, [studyHistory])
+
+  const learningProgressSummary = useMemo(() => {
+    const totalOutcomes = LEARNING_TRACKS.reduce((sum, track) => sum + track.outcomes.length, 0)
+    const completedOutcomes = LEARNING_TRACKS.reduce((sum, track) => {
+      const completed = Math.min(track.outcomes.length, learnProgress[track.id] ?? 0)
+      return sum + completed
+    }, 0)
+
+    const completionPercent = totalOutcomes > 0 ? Math.round((completedOutcomes / totalOutcomes) * 100) : 0
+    const dailyRemaining = Math.max(0, DAILY_LEARN_GOAL - learnDailyProgress.completed)
+
+    return {
+      totalOutcomes,
+      completedOutcomes,
+      completionPercent,
+      dailyRemaining,
+    }
+  }, [learnDailyProgress.completed, learnProgress])
 
   const navigateToScreen = (screen: AppScreen) => {
     setActiveScreen(screen)
@@ -1133,6 +1395,44 @@ function App() {
     persistPhotoStudies(nextPhotos)
   }
 
+  const setTrackProgress = (trackId: string, nextValue: number) => {
+    const maxSteps = TRACK_OUTCOME_COUNTS[trackId] ?? 0
+    const boundedNext = Math.max(0, Math.min(maxSteps, Math.floor(nextValue)))
+    const currentValue = learnProgress[trackId] ?? 0
+
+    if (boundedNext === currentValue) {
+      return
+    }
+
+    setLearnProgress((current) => ({
+      ...current,
+      [trackId]: boundedNext,
+    }))
+
+    if (boundedNext > currentValue) {
+      const completedDelta = boundedNext - currentValue
+      setLearnDailyProgress((current) => {
+        const today = new Date().toISOString().slice(0, 10)
+        if (current.date !== today) {
+          return { date: today, completed: completedDelta }
+        }
+        return {
+          date: current.date,
+          completed: current.completed + completedDelta,
+        }
+      })
+    }
+  }
+
+  const resetLearningProgress = () => {
+    setLearnProgress({})
+    setLearnDailyProgress({
+      date: new Date().toISOString().slice(0, 10),
+      completed: 0,
+    })
+    setPositionMessage('Learning track progress reset.')
+  }
+
   return (
     <div className="app-shell">
       <header className="hero-panel">
@@ -1456,6 +1756,15 @@ function App() {
                     ) : (
                       <p>Candidate grading source: Built-in heuristic engine.</p>
                     )}
+
+                    {candidateCoachNote ? (
+                      <div className="coach-note">
+                        <p><strong>Coach note:</strong> {candidateCoachNote.headline}</p>
+                        <p><strong>Why:</strong> {candidateCoachNote.why}</p>
+                        <p><strong>Try next:</strong> {candidateCoachNote.fix}</p>
+                        <p><strong>Pattern:</strong> {candidateCoachNote.pattern}</p>
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -1535,6 +1844,42 @@ function App() {
 
                     {historySummary.topWarning ? (
                       <p className="warning-signal">Common risk: {historySummary.topWarning}</p>
+                    ) : null}
+
+                    {momentumSummary.points.length > 0 ? (
+                      <div className="momentum-panel">
+                        <div className="momentum-head">
+                          <h4>Momentum</h4>
+                          <p>{momentumSummary.trendLabel}</p>
+                        </div>
+                        <div className="momentum-bars" role="img" aria-label="Recent move quality momentum">
+                          {momentumSummary.points.map((point) => (
+                            <span
+                              key={point.id}
+                              className={`momentum-bar ${qualityTone(point.quality)}`}
+                              style={{ height: `${Math.max(14, point.score)}%` }}
+                              title={`${point.quality} (${point.score}/100)`}
+                            ></span>
+                          ))}
+                        </div>
+                        <p className="history-meta">
+                          Average move quality score: {momentumSummary.average.toFixed(0)} / 100.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {recurringRisks.length > 0 ? (
+                      <div className="mistake-summary">
+                        <h4>Top Recurring Risks</h4>
+                        <ul className="risk-list">
+                          {recurringRisks.map((risk) => (
+                            <li key={risk.risk}>
+                              <span>{risk.risk}</span>
+                              <strong>{risk.count}x</strong>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     ) : null}
 
                     <ol className="history-list">
@@ -1672,6 +2017,42 @@ function App() {
                   </ul>
                 )}
               </article>
+
+              <article className="utility-card">
+                <div className="utility-head">
+                  <h3>Personal Drills</h3>
+                </div>
+                <p className="history-note">
+                  Auto-generated from your biggest evaluation drops so you can revisit recurring mistakes.
+                </p>
+
+                {personalDrills.length === 0 ? (
+                  <p className="empty-note">
+                    Add candidate move reviews first. Your drills will appear here automatically.
+                  </p>
+                ) : (
+                  <ol className="drill-list">
+                    {personalDrills.map((drill) => (
+                      <li key={drill.id} className="drill-item">
+                        <p className="history-line"><strong>{drill.title}</strong></p>
+                        <p className="history-note">{drill.prompt}</p>
+                        <p className="history-meta">{colorName(drill.sideToMove)} to move in this drill position.</p>
+                        <div className="history-actions">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              applyFenPosition(drill.fen, 'Loaded personal drill position.')
+                              navigateToScreen('coach')
+                            }}
+                          >
+                            Open In Coach
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </article>
             </div>
           </section>
         ) : null}
@@ -1683,16 +2064,68 @@ function App() {
                 <h2>Learning Paths</h2>
                 <p>From fundamentals to high-level decision making.</p>
               </div>
+
+              <div className="learn-progress-overview">
+                <div>
+                  <p className="card-kicker">Daily Goal</p>
+                  <h3>Complete {DAILY_LEARN_GOAL} learning outcomes</h3>
+                  <p>
+                    {learningProgressSummary.dailyRemaining > 0
+                      ? `${learningProgressSummary.dailyRemaining} outcomes left today.`
+                      : 'Daily target reached. Nice work, keep the streak going.'}
+                  </p>
+                </div>
+                <div>
+                  <p className="history-meta">
+                    Total completion: {learningProgressSummary.completedOutcomes} / {learningProgressSummary.totalOutcomes} outcomes ({learningProgressSummary.completionPercent}%).
+                  </p>
+                  <button type="button" className="ghost-button" onClick={resetLearningProgress}>
+                    Reset Learn Progress
+                  </button>
+                </div>
+              </div>
+
               <div className="card-grid">
                 {LEARNING_TRACKS.map((track) => (
                   <article key={track.level} className="path-card">
                     <p className="card-kicker">{track.level}</p>
                     <h3>{track.target}</h3>
-                    <ul>
-                      {track.outcomes.map((outcome) => (
-                        <li key={outcome}>{outcome}</li>
-                      ))}
-                    </ul>
+
+                    {(() => {
+                      const completed = Math.min(track.outcomes.length, learnProgress[track.id] ?? 0)
+                      const completionPercent = Math.round((completed / track.outcomes.length) * 100)
+
+                      return (
+                        <>
+                          <p className="history-meta">
+                            {completed}/{track.outcomes.length} outcomes complete ({completionPercent}%).
+                          </p>
+                          <div className="track-progress-bar" aria-hidden="true">
+                            <span style={{ width: `${completionPercent}%` }}></span>
+                          </div>
+                          <ul className="track-outcome-list">
+                            {track.outcomes.map((outcome, outcomeIndex) => {
+                              const isDone = outcomeIndex < completed
+                              const nextProgress = isDone ? outcomeIndex : outcomeIndex + 1
+
+                              return (
+                                <li key={outcome} className={isDone ? 'is-done' : ''}>
+                                  <button
+                                    type="button"
+                                    className={`outcome-toggle ${isDone ? 'is-done' : ''}`}
+                                    onClick={() => setTrackProgress(track.id, nextProgress)}
+                                    aria-pressed={isDone}
+                                  >
+                                    {isDone ? 'Done' : 'Mark'}
+                                  </button>
+                                  <span>{outcome}</span>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </>
+                      )
+                    })()}
                   </article>
                 ))}
               </div>
