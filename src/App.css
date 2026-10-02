@@ -614,23 +614,41 @@ h1 {
 }
 
 .path-section {
-  margin-top: 22px;
+  margin-top: 24px;
 }
 
 .section-heading {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 1.34rem;
+  letter-spacing: -0.02em;
+}
+
+.section-heading p {
+  margin: 0;
+  max-width: 65ch;
 }
 
 .card-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .path-card,
 .mode-card {
-  padding: 14px;
+  padding: 16px;
   background: var(--surface-plain);
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  box-shadow: 0 16px 24px -24px rgba(12, 26, 41, 0.45);
+  display: grid;
+  gap: 8px;
 }
 
 .card-kicker {
@@ -670,11 +688,17 @@ h3 {
   border-radius: 20px;
   background: var(--card-bg);
   box-shadow: 0 24px 36px -30px rgba(17, 31, 45, 0.56);
-  padding: 14px;
+  padding: 16px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 12px;
+}
+
+.learn-progress-overview > div {
+  display: grid;
+  gap: 6px;
+  align-content: start;
 }
 
 .learn-progress-overview p {
@@ -703,11 +727,11 @@ h3 {
 }
 
 .track-outcome-list {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 
 .track-outcome-list li {
@@ -716,6 +740,8 @@ h3 {
   gap: 7px;
   align-items: center;
   color: var(--ink);
+  line-height: 1.34;
+  padding: 2px 0;
 }
 
 .track-outcome-list li.is-done span {
@@ -743,16 +769,16 @@ h3 {
 
 .utility-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
 }
 
 .utility-card {
   background: var(--card-bg);
-  border-radius: 24px;
+  border-radius: 20px;
   border: 1px solid var(--card-border);
   box-shadow: 0 24px 36px -30px rgba(17, 31, 45, 0.56);
-  padding: 14px;
+  padding: 16px;
 }
 
 .utility-head {
@@ -767,9 +793,9 @@ h3 {
 }
 
 .profile-controls {
-  margin-top: 10px;
+  margin-top: 12px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .profile-controls label {
@@ -799,10 +825,11 @@ h3 {
 .empty-note {
   margin-top: 8px;
   color: var(--muted-text);
+  line-height: 1.4;
 }
 
 .stats-row {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -825,11 +852,11 @@ h3 {
 }
 
 .momentum-panel {
-  margin-top: 10px;
+  margin-top: 12px;
   border: 1px solid var(--line-soft);
   border-radius: 12px;
   background: var(--surface-muted);
-  padding: 10px;
+  padding: 11px;
 }
 
 .momentum-head {
@@ -853,8 +880,8 @@ h3 {
 }
 
 .momentum-bars {
-  margin-top: 10px;
-  min-height: 70px;
+  margin-top: 11px;
+  min-height: 78px;
   display: grid;
   align-items: end;
   grid-template-columns: repeat(auto-fit, minmax(8px, 1fr));
@@ -868,11 +895,11 @@ h3 {
 }
 
 .mistake-summary {
-  margin-top: 10px;
+  margin-top: 12px;
   border: 1px solid var(--line-soft);
   border-radius: 12px;
   background: var(--surface-subtle);
-  padding: 10px;
+  padding: 11px;
 }
 
 .risk-list {
@@ -888,6 +915,7 @@ h3 {
   justify-content: space-between;
   gap: 10px;
   color: var(--muted-text);
+  line-height: 1.34;
 }
 
 .risk-list strong {
@@ -899,14 +927,14 @@ h3 {
   margin: 10px 0 0;
   padding: 0;
   display: grid;
-  gap: 9px;
+  gap: 10px;
 }
 
 .history-item {
   border: 1px solid var(--line-soft);
   border-radius: 12px;
   background: var(--surface-plain);
-  padding: 10px;
+  padding: 11px;
 }
 
 .history-line {
@@ -928,7 +956,7 @@ h3 {
 }
 
 .history-actions {
-  margin-top: 8px;
+  margin-top: 10px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -944,14 +972,14 @@ h3 {
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 9px;
+  gap: 10px;
 }
 
 .drill-item {
   border: 1px solid var(--line-soft);
   border-radius: 12px;
   background: var(--surface-plain);
-  padding: 10px;
+  padding: 11px;
 }
 
 .detected-fen-box {
@@ -959,7 +987,7 @@ h3 {
   border: 1px solid var(--line-soft);
   border-radius: 12px;
   background: var(--surface-muted);
-  padding: 10px;
+  padding: 11px;
 }
 
 .dialog-backdrop {
@@ -1028,7 +1056,7 @@ h3 {
   gap: 10px;
   border: 1px solid var(--line-soft);
   border-radius: 12px;
-  padding: 8px;
+  padding: 10px;
   background: var(--surface-plain);
 }
 
